@@ -1,23 +1,20 @@
-# In ProAct-Log/desktop-agent/bridge.py
+# In desktop-agent/bridge.py
 
 import requests
 import time
 
-# --- IMPORTANT: UPDATE THIS VARIABLE ---
-# Find your specific bucket ID from the ActivityWatch API browser.
-# It looks like: aw-watcher-window_YOUR-PC-NAME
-AW_BUCKET_ID = "aw-watcher-window_SN"
+# --- Configuration ---
+AW_BUCKET_ID = "aw-watcher-window_SN" # Make sure this is still correct!
 AW_API_URL = f"http://localhost:5600/api/0/buckets/{AW_BUCKET_ID}/events"
+BACKEND_API_URL = "http://127.0.0.1:8000/log_activity" # The URL of your new backend
 
 print("Starting bridge to ActivityWatch... Press Ctrl+C to stop.")
 
 def get_latest_activity():
     """Fetches the most recent activity log from the ActivityWatch API."""
     try:
-        # We only need the single most recent event, so we use ?limit=1
         response = requests.get(AW_API_URL, params={"limit": 1})
-        response.raise_for_status()  # This will raise an error if the request fails
-
+        response.raise_for_status()
         events = response.json()
         if events:
             latest_event = events[0]
@@ -25,21 +22,34 @@ def get_latest_activity():
             title = latest_event['data']['title']
             return app, title
         return None, None
-
     except requests.exceptions.RequestException:
-        print(f"Error: Could not connect to ActivityWatch API.")
-        print("Please make sure ActivityWatch is running.")
+        print("Error: Could not connect to ActivityWatch API. Is it running?")
         return None, None
 
-# --- Main Loop ---
+# --- NEW FUNCTION ---
+def send_activity_to_backend(app_name, window_title):
+    """Sends the activity log to our FastAPI backend."""
+    try:
+        # Create the JSON payload that our backend expects
+        payload = {
+            "application_name": app_name,
+            "window_title": window_title
+        }
+        # Send the data using an HTTP POST request
+        response = requests.post(BACKEND_API_URL, json=payload)
+        response.raise_for_status()
+        print(f"Log sent successfully: {app_name}")
+    except requests.exceptions.RequestException:
+        print("Error: Could not send log to backend. Is the backend server running?")
+
+# --- Main Loop (Updated) ---
 last_title = ""
 while True:
     app_name, window_title = get_latest_activity()
 
-    # Only print the activity if it is new and valid
     if window_title and window_title != last_title:
-        print(f"New Activity -> App: {app_name}, Title: {window_title}")
+        # Instead of printing, we now send the data to the backend
+        send_activity_to_backend(app_name, window_title)
         last_title = window_title
 
-    # Wait for 10 seconds before checking again
     time.sleep(10)
