@@ -1,7 +1,8 @@
-// In frontend/src/App.js
+// frontend/src/App.js
 
 import React, { useState, useEffect } from 'react';
 import './App.css';
+import ProductivityChart from './ProductivityChart'; // Import the new chart component
 
 function App() {
   // 'useState' creates variables to store the list of activities and any errors
@@ -42,6 +43,11 @@ function App() {
         <p>A real-time view of your recent device activity.</p>
       </header>
       <main className="activity-container">
+        {/* Render the new ProductivityChart component */}
+        <ProductivityChart />
+
+        <h2 className="activity-heading">Recent Activity Log</h2>
+
         {/* If there's an error, display it. Otherwise, show the activity list. */}
         {error ? (
           <p className="error-message">{error}</p>
@@ -49,8 +55,15 @@ function App() {
           <div className="activity-list">
             {/* Loop through the 'activities' array and create a card for each one */}
             {activities.map((activity, index) => (
-              <div key={index} className="activity-card">
-                <p className="app-name">{activity.app_name}</p>
+              // The className of the card will now change based on its category for styling
+              <div key={index} className={`activity-card ${activity.category}`}>
+                <div className="card-header">
+                  <p className="app-name">{activity.app_name}</p>
+                  {/* Display the category as a colored badge */}
+                  <span className={`category-badge ${activity.category}`}>
+                    {activity.category}
+                  </span>
+                </div>
                 <p className="window-title">{activity.window_title}</p>
                 <p className="timestamp">
                   {new Date(activity.timestamp).toLocaleString()}

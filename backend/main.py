@@ -73,3 +73,25 @@ async def get_activities():
     except Exception as e:
         print(f"Database Error: {e}")
         raise HTTPException(status_code=500, detail="Database connection failed")
+
+@app.get("/productivity-summary")
+async def get_productivity_summary():
+    """Calculates the count of activities per category for today."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        # --- CORRECTED SQL QUERY ---
+        # This version is more compatible with SQLite
+        cur.execute("""
+            SELECT category, COUNT(*) as count
+            FROM activity_logs
+            WHERE DATE(timestamp) = DATE('now')
+            GROUP BY category
+        """)
+        summary_data = cur.fetchall()
+        cur.close()
+        conn.close()
+        return summary_data
+    except Exception as e:
+        print(f"Database Error on /productivity-summary: {e}")
+        raise HTTPException(status_code=500, detail="Database connection failed")
