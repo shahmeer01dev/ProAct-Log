@@ -208,3 +208,8 @@ __marimo__/
 
 # Ignore the SQLite database file in the backend folder
 backend/activity_logs.db
+## Also ignore database files created at the repository root
+activity_logs.db
+
+# Ignore bigdata directory and all its contents (large local datasets)
+bigdata/
