@@ -3,6 +3,9 @@ from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 import datetime
 import sqlite3
+import pandas as pd
+import os
+import pyarrow
 
 # --- 1. Define the data structure our API expects ---
 class ActivityLog(BaseModel):
