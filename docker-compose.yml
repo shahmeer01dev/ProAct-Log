@@ -1,0 +1,87 @@
+version: '3.8'
+
+services:
+  # 1. PostgreSQL Database Service
+  postgres:
+    image: postgres:15-alpine
+    container_name: proact_postgres
+    restart: always
+    environment:
+      POSTGRES_DB: proact_log_db
+      POSTGRES_USER: proact_user
+      POSTGRES_PASSWORD: proact_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432" # Optional: Map port for local debugging
+
+  # 2. Apache Zookeeper Service (Required for Kafka)
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  # 3. Apache Kafka Broker Service
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      # Use the internal service name 'kafka' for internal communication
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_INTERNAL://kafka:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  # 4. FastAPI Producer Service (API and Reporting)
+  api_producer:
+    build: 
+      context: ./backend 
+      dockerfile: Dockerfile
+    container_name: proact_api
+    depends_on:
+      - kafka 
+      - postgres # UPDATED: The API needs to read from Postgres for reporting
+    environment:
+      KAFKA_BROKER: kafka:29092 
+      # UPDATED: Add Postgres connection details for the reporting endpoints
+      POSTGRES_HOST: postgres 
+      POSTGRES_DB: proact_log_db
+      POSTGRES_USER: proact_user
+      POSTGRES_PASSWORD: proact_password
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+
+  # 5. Spark Consumer/Processor Service
+  spark_processor:
+    build:
+      context: ./spark-processor 
+      dockerfile: Dockerfile
+    container_name: proact_spark_processor
+    depends_on:
+      - kafka
+      - postgres 
+    environment:
+      KAFKA_BROKER: kafka:29092 
+      POSTGRES_HOST: postgres 
+      POSTGRES_DB: proact_log_db
+      POSTGRES_USER: proact_user
+      POSTGRES_PASSWORD: proact_password
+    volumes:
+      - ./spark-processor:/app
+      - spark_checkpoint:/app/spark_checkpoint # For fault-tolerance
+
+volumes:
+  postgres_data:
+  spark_checkpoint:
