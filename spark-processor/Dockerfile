@@ -19,7 +19,7 @@ ENV POSTGRES_JDBC_VERSION=42.7.3
 RUN wget -q "https://jdbc.postgresql.org/download/postgresql-${POSTGRES_JDBC_VERSION}.jar" -O ${SPARK_HOME}/jars/postgresql-${POSTGRES_JDBC_VERSION}.jar
 
 # Install PySpark
-RUN pip3 install --no-cache-dir pyspark==${SPARK_VERSION} 
+RUN pip3 install --break-system-packages --no-cache-dir pyspark==${SPARK_VERSION}
 
 WORKDIR /app
 # Copy the Python script that runs the processor
