@@ -6,7 +6,7 @@ import time
 # --- Configuration ---
 AW_BUCKET_ID = "aw-watcher-window_SN" # Make sure this is still correct!
 AW_API_URL = f"http://localhost:5600/api/0/buckets/{AW_BUCKET_ID}/events"
-BACKEND_API_URL = "http://127.0.0.1:8000/log_activity" # The URL of your new backend
+BACKEND_API_URL = "http://localhost:8000/log_activity" # The URL of your new backend
 
 print("Starting bridge to ActivityWatch... Press Ctrl+C to stop.")
 
