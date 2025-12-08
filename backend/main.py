@@ -5,10 +5,13 @@ import datetime
 import os
 # --- BIG DATA PHASE 2 CHANGES ---
 from kafka import KafkaProducer # NEW: Import Kafka Producer
+from kafka.errors import NoBrokersAvailable # NEW: Import specific Kafka error for retry logic
 import json
 import logging
 import psycopg2 # ADDED: Import for PostgreSQL connection
 from psycopg2 import extras # ADDED: For dictionary-like row fetching
+import threading # NEW: For background initialization thread
+import time # NEW: For sleep in retry
 # ---------------------------------
 
 # --- COMMENTED OUT PHASE 1 IMPORTS ---
@@ -23,19 +26,38 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- Kafka Configuration (NEW) ---
-KAFKA_BROKER = os.getenv("KAFKA_BROKER", "localhost:9092") # UPDATED: Read from ENV
-KAFKA_TOPIC = "raw_activity_logs" # The topic name for raw data
+KAFKA_BROKER = os.getenv("KAFKA_BROKER", "localhost:9092") 
+KAFKA_TOPIC = "raw_activity_logs" 
 
-# Initialize Kafka Producer
-try:
-    producer = KafkaProducer(
-        bootstrap_servers=[KAFKA_BROKER],
-        value_serializer=lambda v: json.dumps(v).encode('utf-8')
-    )
-    logger.info("Kafka Producer initialized successfully.")
-except Exception as e:
-    logger.error(f"Failed to initialize Kafka Producer: {e}")
-    producer = None
+# --- Global Producer State (UPDATED: Mutable container) ---
+# We use a list to hold the producer object so we can modify it inside functions.
+kafka_producer_container = [None] 
+
+
+def try_init_kafka_producer():
+    """Attempts to initialize the Kafka Producer, retrying if necessary."""
+    logger.info("Attempting to initialize Kafka Producer in background thread...")
+    max_retries = 10
+    retry_delay_seconds = 5
+    
+    for attempt in range(max_retries):
+        try:
+            producer = KafkaProducer(
+                bootstrap_servers=[KAFKA_BROKER],
+                value_serializer=lambda v: json.dumps(v).encode('utf-8')
+            )
+            # Success! Store the initialized producer globally.
+            kafka_producer_container[0] = producer
+            logger.info("Kafka Producer initialized successfully after attempts.")
+            return
+        except NoBrokersAvailable:
+            logger.warning(f"Kafka not yet available. Retrying in {retry_delay_seconds}s... (Attempt {attempt + 1}/{max_retries})")
+            time.sleep(retry_delay_seconds)
+        except Exception as e:
+            logger.error(f"Failed to initialize Kafka Producer: {e}")
+            break # Exit on unexpected error
+
+    logger.error("Failed to initialize Kafka Producer after all retries. The /log_activity endpoint will return 503.")
 
 
 # --- PostgreSQL Configuration (NEW) ---
@@ -52,93 +74,19 @@ class ActivityLog(BaseModel):
 
 app = FastAPI()
 
-# --- COMMENTED OUT PHASE 1 DB FUNCTIONS ---
 
-# def init_db():
-#     # OLD: Function to initialize SQLite/PostgreSQL DB table
-#     try:
-#         conn = get_db_connection()
-#         cur = conn.cursor()
-#         cur.execute("""
-#             CREATE TABLE IF NOT EXISTS activity_logs (
-#                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-#                 timestamp DATETIME NOT NULL,
-#                 app_name TEXT NOT NULL,
-#                 window_title TEXT,
-#                 category TEXT
-#             )
-#         """)
-#         conn.commit()
-#         cur.close()
-#         conn.close()
-#         print("Database initialized. 'activity_logs' table is ready.")
-#     except Exception as e:
-#         print(f"Error initializing database: {e}")
-
-# @app.on_event("startup")
-# async def startup_event():
-#     # OLD: Call init_db on startup
-#     init_db()
-
-# def get_db_connection():
-#     # OLD: Returns the database connection object (SQLite/PostgreSQL)
-#     conn = sqlite3.connect("activity_logs.db")
-#     return conn
-    
-# def write_parquet_row(timestamp, app_name, window_title, category):
-#     # OLD: Function to write raw data to a Parquet file for potential future Spark consumption
-#     date_str = timestamp.strftime("%Y-%m-%d")
-#     folder = "bigdata"
-#     os.makedirs(folder, exist_ok=True)
-#     path = os.path.join(folder, f"{date_str}.parquet")
-#     df = pd.DataFrame([{
-#         "timestamp": timestamp,
-#         "app_name": app_name,
-#         "window_title": window_title,
-#         "category": category
-#     }])
-#     if os.path.exists(path):
-#         old = pd.read_parquet(path, engine='pyarrow')
-#         df = pd.concat([old, df], ignore_index=True)
-#     df.to_parquet(path, engine='pyarrow')
-    
-# -----------------------------------------------------
-
-# NOTE: The categorize_activity function is now moved to the Spark processor (Step 3) 
-# as part of the Big Data processing layer. We keep it here commented out 
-# for reference to its old logic.
-# def categorize_activity(app_name: str, window_title: str) -> str:
-#     app_lower = app_name.lower()
-#     title_lower = window_title.lower()
-#     if "code" in app_lower or "visual studio" in app_lower or "terminal" in app_lower or "iterm" in app_lower:
-#         return "Development"
-#     if "slack" in app_lower or "discord" in app_lower or "zoom" in app_lower or "teams" in app_lower:
-#         return "Communication"
-#     if "chrome" in app_lower or "firefox" in app_lower or "safari" in app_lower:
-#         if "youtube" in title_lower:
-#             return "Browsing (YouTube)"
-#         if "github" in title_lower:
-#             return "Development"
-#         return "Browsing"
-#     return "Uncategorized"
-
-
-origins = [
-    "http://localhost:3000",
-]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# --- STARTUP EVENT HOOK (NEW) ---
+@app.on_event("startup")
+async def startup_event():
+    """Starts the Kafka producer initialization in a background thread."""
+    # We do NOT want to block the FastAPI startup, so we run this in a separate thread.
+    threading.Thread(target=try_init_kafka_producer, daemon=True).start()
 
 
 # --- NEW POSTGRES CONNECTION FUNCTION ---
 def get_db_connection():
     """Returns a connection to the PostgreSQL reporting database."""
+    # ... (function remains the same)
     try:
         conn = psycopg2.connect(
             host=POSTGRES_HOST,
@@ -149,40 +97,22 @@ def get_db_connection():
         return conn
     except Exception as e:
         logger.error(f"PostgreSQL connection failed: {e}")
-        # Raising HTTPException here is necessary for the FastAPI response
         raise HTTPException(status_code=503, detail="Database service unavailable.")
 
 
 @app.post("/log_activity")
 async def log_activity_endpoint(activity: ActivityLog):
     """
-    CHANGED FOR PHASE 2: This endpoint now acts as a Kafka Producer, 
-    publishing the raw activity log to a Kafka topic instead of writing 
-    directly to a relational database.
+    Kafka Producer Endpoint. Now checks the global state of the producer.
     """
+    producer = kafka_producer_container[0] # Get current producer instance
+    
     if producer is None:
-        raise HTTPException(status_code=503, detail="Kafka Producer is unavailable. Check Kafka Broker status.")
+        # This will happen if Kafka is still starting up or failed to initialize
+        raise HTTPException(status_code=503, detail="Kafka Producer is unavailable. Topic ingestion stalled.")
 
     timestamp = datetime.datetime.now().isoformat()
-    # OLD: category = categorize_activity(activity.application_name, activity.window_title)
-
-    # OLD: Database/Parquet Write Logic
-    # try:
-    #     conn = get_db_connection()
-    #     cur = conn.cursor()
-    #     cur.execute(
-    #         "INSERT INTO activity_logs (timestamp, app_name, window_title, category) VALUES (?, ?, ?, ?)",
-    #         (timestamp, activity.application_name, activity.window_title, category)
-    #     )
-    #     conn.commit()
-    #     cur.close()
-    #     conn.close()
-    #     write_parquet_row(timestamp, activity.application_name, activity.window_title, category)
-    #     return {"status": "success", "message": "Log saved"}
-    # except Exception as e:
-    #     raise HTTPException(status_code=500, detail=f"Database connection failed: {e}")
-
-    # NEW: Kafka Publish Logic
+    
     payload = {
         "timestamp": timestamp,
         "app_name": activity.application_name,
@@ -200,6 +130,8 @@ async def log_activity_endpoint(activity: ActivityLog):
 
 
 # --- PHASE 2 REPORTING ENDPOINTS (Reading from PostgreSQL) ---
+# ... (All reporting endpoints remain unchanged)
+
 
 @app.get("/activities")
 async def get_activities():
