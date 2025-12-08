@@ -104,7 +104,7 @@ def write_to_postgres(current_df, batch_id):
             .option("dbtable", POSTGRES_TABLE) \
             .option("user", POSTGRES_USER) \
             .option("password", POSTGRES_PASSWORD) \
-            .option("driver", "org.postgresql.Driver") 
+            .option("driver", "org.postgresql.Driver") \
             .mode("append") \
             .save()
         
@@ -115,7 +115,7 @@ def write_to_postgres(current_df, batch_id):
 query = final_df.writeStream \
     .outputMode("append") \
     .foreachBatch(write_to_postgres) \
-    .option("checkpointLocation", "/app/spark_checkpoint/proactlog_processor") # Uses the mounted volume
+    .option("checkpointLocation", "/app/spark_checkpoint/proactlog_processor") \
     .start()
 
 query.awaitTermination()
