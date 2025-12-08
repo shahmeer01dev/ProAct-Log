@@ -10,7 +10,7 @@ function BarChart() {
   useEffect(() => {
     async function fetchData() {
       try {
-        const res = await fetch('http://127.0.0.1:8000/activities');
+        const res = await fetch('http://localhost:8000/activities');
         const activities = await res.json();
 
         const countsPerHour = Array.from({ length: 24 }, () => ({}));
